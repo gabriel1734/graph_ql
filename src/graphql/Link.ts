@@ -1,5 +1,15 @@
-import { extendType, intArg, nonNull, objectType, stringArg } from 'nexus';
-import { NexusGenObjects } from '../../nexus-typegen';
+import { Prisma } from '@prisma/client';
+import {
+  arg,
+  enumType,
+  extendType,
+  inputObjectType,
+  intArg,
+  list,
+  nonNull,
+  objectType,
+  stringArg,
+} from 'nexus';
 
 export const Link = objectType({
   name: 'Link',
@@ -7,29 +17,92 @@ export const Link = objectType({
     t.nonNull.int('id');
     t.nonNull.string('description');
     t.nonNull.string('url');
+    t.nonNull.dateTime('createdAt');
+    t.dateTime('updatedAt');
+    t.field('postedBy', {
+      type: 'User',
+      resolve(parent, args, context) {
+        return context.prisma.link
+          .findUnique({ where: { id: parent.id } })
+          .postedBy();
+      },
+    });
+    t.nonNull.list.nonNull.field('voters', {
+      type: 'User',
+      resolve(parent, args, context) {
+        return context.prisma.link
+          .findUnique({ where: { id: parent.id } })
+          .voters();
+      },
+    });
   },
 });
 
-const links: NexusGenObjects['Link'][] = [
-  {
-    id: 1,
-    description: 'Fullstack tutorial for GraphQL',
-    url: 'www.howtographql.com',
+export const LinkOrderByInput = inputObjectType({
+  name: 'LinkOrderByInput',
+  definition(t) {
+    t.field('description', { type: Sort });
+    t.field('url', { type: Sort });
+    t.field('createdAt', { type: Sort });
   },
-  {
-    id: 2,
-    description: 'GraphQL Schema Language',
-    url: 'graphql.org/learn/schema',
+});
+
+export const Sort = enumType({
+  name: 'Sort',
+  members: ['asc', 'desc'],
+});
+
+export const Feed = objectType({
+  name: 'Feed',
+  definition(t) {
+    t.nonNull.list.nonNull.field('links', { type: 'Link' });
+    t.nonNull.int('count');
+    t.id('id');
   },
-];
+});
 
 export const LinkQuery = extendType({
   type: 'Query',
   definition(t) {
-    t.nonNull.list.nonNull.field('feed', {
-      type: 'Link',
-      resolve(parent, args, context, info) {
-        return links;
+    t.nonNull.field('feed', {
+      type: 'Feed',
+      args: {
+        filter: stringArg(),
+        skip: intArg(),
+        take: intArg(),
+        orderBy: arg({ type: list(nonNull(LinkOrderByInput)) }),
+      },
+      async resolve(parent, args, context) {
+        const where = args.filter
+          ? {
+              OR: [
+                { description: { contains: args.filter } },
+                { url: { contains: args.filter } },
+              ],
+            }
+          : {};
+
+        const links = context.prisma.link.findMany({
+          where,
+          skip: args?.skip as number | undefined,
+          take: args?.take as number | undefined,
+          orderBy: args?.orderBy as
+            | Prisma.Enumerable<Prisma.LinkOrderByWithRelationInput>
+            | undefined,
+        });
+
+        if (!links) {
+          throw new Error('No links found');
+        }
+
+        const count = await context.prisma.link.count({ where });
+        const id = `main-feed: ${JSON.stringify(args)}`;
+
+        return {
+          links,
+          count,
+          id,
+        };
       },
     });
   },
@@ -45,17 +118,37 @@ export const LinkMutation = extendType({
         url: nonNull(stringArg()),
       },
 
-      resolve(parent, args) {
+      async resolve(parent, args, context) {
         const { description, url } = args;
+        const { userId } = context;
 
-        const idCount = links.length + 1;
-        const link = {
-          id: idCount,
-          description,
-          url,
-        };
-        links.push(link);
-        return link;
+        if (!userId) {
+          throw new Error('Not authenticated');
+        }
+
+        const isExistingLink = await context.prisma.link.findFirst({
+          where: {
+            OR: [{ description }, { url }],
+          },
+        });
+
+        if (isExistingLink) {
+          throw new Error('Link or description already exists');
+        }
+
+        const newLink = context.prisma.link.create({
+          data: {
+            description,
+            url,
+            postedBy: { connect: { id: userId } },
+          },
+        });
+
+        if (!newLink) {
+          throw new Error('Could not create link');
+        }
+
+        return newLink;
       },
     });
   },
@@ -72,20 +165,53 @@ export const UpdateLinkMutation = extendType({
         url: nonNull(stringArg()),
       },
 
-      resolve(parent, args) {
+      async resolve(parent, args, context) {
         const { id, description, url } = args;
 
-        const link = links.find((link) => link.id === id);
+        const { userId } = context;
 
-        if (!link) {
-          throw new Error(`Couldn't find link with id ${id}`);
+        if (!userId) {
+          throw new Error('Not authenticated');
         }
 
-        link.description = description;
-        link.url = url;
+        const linkExist = await context.prisma.link.findUnique({
+          where: { id },
+        });
 
-        links.find((link) => link.id === id)!.description = link.description;
-        links.find((link) => link.id === id)!.url = link.url;
+        if (!linkExist) {
+          throw new Error('Link does not exist');
+        }
+
+        const isExistingLink = await context.prisma.link.findFirst({
+          where: {
+            OR: [{ description }, { url }],
+          },
+        });
+
+        if (isExistingLink) {
+          throw new Error('Link or description already exists');
+        }
+
+        const isTheSameUser = await context.prisma.link.findFirst({
+          where: {
+            AND: [{ id }, { postedById: userId }],
+          },
+        });
+
+        if (!isTheSameUser) {
+          throw new Error('Not authorized, you are not the owner of this link');
+        }
+
+        const link = context.prisma.link.update({
+          where: {
+            id,
+          },
+          data: {
+            description,
+            url,
+            postedBy: { connect: { id: userId } },
+          },
+        });
 
         return link;
       },
@@ -93,7 +219,7 @@ export const UpdateLinkMutation = extendType({
   },
 });
 
-export const DeleteLinkMutatio = extendType({
+export const DeleteLinkMutation = extendType({
   type: 'Mutation',
   definition(t) {
     t.nonNull.field('deleteLink', {
@@ -102,16 +228,43 @@ export const DeleteLinkMutatio = extendType({
         id: nonNull(intArg()),
       },
 
-      resolve(parent, args) {
+      async resolve(parent, args, context) {
         const { id } = args;
+        const { userId } = context;
 
-        const link = links.find((link) => link.id === id);
-
-        if (!link) {
-          throw new Error(`Couldn't find link with id ${id}`);
+        if (!userId) {
+          throw new Error('Not authenticated');
         }
 
-        links.splice(links.indexOf(link!), 1);
+        const isLinkExist = await context.prisma.link.findFirst({
+          where: {
+            id,
+          },
+        });
+
+        if (!isLinkExist) {
+          throw new Error('Link does not exist');
+        }
+
+        const isTheSameUser = await context.prisma.link.findFirst({
+          where: {
+            AND: [{ id }, { postedById: userId }],
+          },
+        });
+
+        if (!isTheSameUser) {
+          throw new Error('Not authorized, you are not the owner of this link');
+        }
+
+        const link = context.prisma.link.delete({
+          where: {
+            id,
+          },
+        });
+
+        if (!link) {
+          throw new Error('Could not delete link');
+        }
 
         return link;
       },
@@ -128,10 +281,14 @@ export const FindOneLink = extendType({
         id: nonNull(intArg()),
       },
 
-      resolve(parent, args) {
+      resolve(parent, args, context) {
         const { id } = args;
 
-        const link = links.find((link) => link.id === id);
+        const link = context.prisma.link.findUnique({
+          where: {
+            id,
+          },
+        });
 
         if (!link) {
           throw new Error(`Couldn't find link with id ${id}`);
