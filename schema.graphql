@@ -23,6 +23,7 @@ type Link {
   description: String!
   id: Int!
   postedBy: User
+  totalVotes: Int
   updatedAt: DateTime
   url: String!
   voters: [User!]!

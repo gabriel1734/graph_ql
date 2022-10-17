@@ -10,6 +10,7 @@ import {
   objectType,
   stringArg,
 } from 'nexus';
+import AppError from '../utils/AppError';
 
 export const Link = objectType({
   name: 'Link',
@@ -19,6 +20,7 @@ export const Link = objectType({
     t.nonNull.string('url');
     t.nonNull.dateTime('createdAt');
     t.dateTime('updatedAt');
+    t.int('totalVotes');
     t.field('postedBy', {
       type: 'User',
       resolve(parent, args, context) {
@@ -92,7 +94,7 @@ export const LinkQuery = extendType({
         });
 
         if (!links) {
-          throw new Error('No links found');
+          throw new AppError('No links found', 404);
         }
 
         const count = await context.prisma.link.count({ where });
@@ -123,7 +125,7 @@ export const LinkMutation = extendType({
         const { userId } = context;
 
         if (!userId) {
-          throw new Error('Not authenticated');
+          throw new AppError('Not authenticated', 401);
         }
 
         const isExistingLink = await context.prisma.link.findFirst({
@@ -199,7 +201,10 @@ export const UpdateLinkMutation = extendType({
         });
 
         if (!isTheSameUser) {
-          throw new Error('Not authorized, you are not the owner of this link');
+          throw new AppError(
+            'Not authorized, you are not the owner of this link',
+            401,
+          );
         }
 
         const link = context.prisma.link.update({

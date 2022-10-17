@@ -35,6 +35,9 @@ export const VoteMutation = extendType({
                 id: userId,
               },
             },
+            totalVotes: {
+              increment: 1,
+            },
           },
         });
 

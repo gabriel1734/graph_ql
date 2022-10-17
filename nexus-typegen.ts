@@ -63,6 +63,7 @@ export interface NexusGenObjects {
     createdAt: NexusGenScalars['DateTime']; // DateTime!
     description: string; // String!
     id: number; // Int!
+    totalVotes?: number | null; // Int
     updatedAt?: NexusGenScalars['DateTime'] | null; // DateTime
     url: string; // String!
   }
@@ -104,6 +105,7 @@ export interface NexusGenFieldTypes {
     description: string; // String!
     id: number; // Int!
     postedBy: NexusGenRootTypes['User'] | null; // User
+    totalVotes: number | null; // Int
     updatedAt: NexusGenScalars['DateTime'] | null; // DateTime
     url: string; // String!
     voters: NexusGenRootTypes['User'][]; // [User!]!
@@ -148,6 +150,7 @@ export interface NexusGenFieldTypeNames {
     description: 'String'
     id: 'Int'
     postedBy: 'User'
+    totalVotes: 'Int'
     updatedAt: 'DateTime'
     url: 'String'
     voters: 'User'
